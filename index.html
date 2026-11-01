@@ -92,7 +92,13 @@
   }
   .ratebar label { margin: 0; flex: 1 1 160px; }
   .ratebar input { flex: 1 1 140px; max-width: 220px; }
+  .ratebar select {
+    flex: 1 1 140px; max-width: 220px; font: inherit; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--ink);
+  }
   .ratenote { flex-basis: 100%; margin: 0; font-size: 0.82rem; color: var(--muted); }
+  .ratenote:empty { display: none; }
   .ratenote.old { color: var(--warn); }
 
   /* start screen */
@@ -132,7 +138,7 @@
     color: var(--ink);
   }
   input.auto { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
-  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
   button.btn {
     font: inherit; font-weight: 600; cursor: pointer;
@@ -177,10 +183,19 @@
   <h1>Gold & Diamond Price Calculator</h1>
   <p class="lede">Enter the figures from the item tag to work out today’s selling price.</p>
 
-  <!-- Gold rate: set once, used for both scan and manual entry -->
+  <!-- Gold rate: set once (24K), karat chosen per item -->
   <div class="ratebar">
-    <label for="goldRate">Today’s gold rate <small>NPR per tola — saved on this device</small></label>
+    <label for="goldRate">Today’s 24K gold rate <small>NPR per tola — saved on this device</small></label>
     <input id="goldRate" type="number" inputmode="decimal" min="0" step="any" placeholder="0">
+    <label for="karat">Gold purity <small>Karat of this item</small></label>
+    <select id="karat">
+      <option value="24">24K</option>
+      <option value="22" selected>22K</option>
+      <option value="18">18K</option>
+      <option value="14">14K</option>
+      <option value="9">9K</option>
+    </select>
+    <p class="ratenote" id="karatNote"></p>
     <p class="ratenote" id="rateNote" hidden></p>
   </div>
 
@@ -262,7 +277,8 @@
           <div class="row"><dt>G.Wt</dt><dd id="oG">—</dd></div>
           <div class="row"><dt>N.Wt</dt><dd id="oN">—</dd></div>
           <div class="row"><dt>Diamond</dt><dd id="oD">—</dd></div>
-          <div class="row"><dt>Gold rate</dt><dd id="oR">—</dd></div>
+          <div class="row"><dt>Purity</dt><dd id="oP">—</dd></div>
+          <div class="row"><dt id="oRLabel">Gold rate</dt><dd id="oR">—</dd></div>
           <div class="row"><dt>Gold price</dt><dd id="oGold">—</dd></div>
           <div class="row"><dt>Diamond price</dt><dd id="oDia">—</dd></div>
           <div class="row sub" id="subBase" hidden><dt>Dia × diamond rate</dt><dd id="oBase">—</dd></div>
@@ -271,7 +287,8 @@
         <div class="total"><span>Final price</span><span id="oFinal">Rs. —</span></div>
       </div>
       <p class="formula">
-        Gold price = (N.Wt × 82 ÷ 100 ÷ 11.664) × gold rate &nbsp;·&nbsp;
+        Karat rate = 24K rate × (karat ÷ 24) &nbsp;·&nbsp;
+        Gold price = (N.Wt ÷ 11.664) × karat rate &nbsp;·&nbsp;
         Diamond price = (Dia × diamond rate) + add-on % of that amount &nbsp;·&nbsp;
         Final = gold + diamond
       </p>
@@ -320,18 +337,35 @@
     }
   }
 
+  /* ---------- calculator ---------- */
+  function num(id) { var v = parseFloat($(id).value); return isFinite(v) ? v : 0; }
+  function rs(n) { return "Rs. " + fmt.format(Math.round(n)); }
+
+  // Karat purity: karat ÷ 24 × 100. Karat rate = purity × 24K rate.
+  function karatInfo() {
+    var k = parseFloat($("karat").value) || 24;
+    var purity = k / 24 * 100;
+    var rate24 = num("goldRate");
+    return { k: k, purity: purity, rate: rate24 * purity / 100 };
+  }
+  function showKaratNote() {
+    var i = karatInfo();
+    $("karatNote").textContent = i.rate > 0
+      ? i.k + "K purity " + fmtDec.format(Math.round(i.purity * 100) / 100) + "% → " + i.k + "K rate Rs. " + fmt.format(Math.round(i.rate)) + " per tola"
+      : "";
+  }
+
   function restoreRates() {
     // The gold rate stays fixed until you change it; a reminder shows if it is from an earlier day.
     var g = load("goldRate");
     if (g) { try { var o = JSON.parse(g); if (o.value) $("goldRate").value = o.value; } catch (e) {} }
     var d = load("diaRate");
     if (d) $("diaRate").value = d;
+    var kt = load("karat");
+    if (kt) $("karat").value = kt;
+    showKaratNote();
     showRateNote();
   }
-
-  /* ---------- calculator ---------- */
-  function num(id) { var v = parseFloat($(id).value); return isFinite(v) ? v : 0; }
-  function rs(n) { return "Rs. " + fmt.format(Math.round(n)); }
 
   function calculate() {
     var msg = $("msg");
@@ -341,14 +375,15 @@
 
     if (nwt <= 0 && dia <= 0) { msg.textContent = "Enter the net weight or the diamond weight."; return; }
     if (nwt > 0 && goldRate <= 0) {
-      msg.textContent = "Enter today’s gold rate (NPR per tola) in the box at the top.";
+      msg.textContent = "Enter today’s 24K gold rate (NPR per tola) in the box at the top.";
       $("goldRate").focus();
       return;
     }
     if (dia > 0 && diaRate <= 0) { msg.textContent = "Enter the diamond rate (NPR per carat)."; return; }
     if (gwt > 0 && nwt > gwt) { msg.textContent = "Net weight is more than gross weight. Check the tag."; return; }
 
-    var goldPrice = (nwt * 82 / 100 / 11.664) * goldRate;
+    var ki = karatInfo();
+    var goldPrice = (nwt / 11.664) * ki.rate;
     var diaBase = dia * diaRate;
     var diaExtra = diaBase * pct / 100;   // empty % = 0, so the price is unchanged
     var diaPrice = diaBase + diaExtra;
@@ -359,7 +394,9 @@
     $("oG").textContent = gwt > 0 ? fmtDec.format(gwt) + " g" : "—";
     $("oN").textContent = fmtDec.format(nwt) + " g";
     $("oD").textContent = fmtDec.format(dia) + " ct";
-    $("oR").textContent = rs(goldRate) + " / tola";
+    $("oP").textContent = ki.k + "K = " + fmtDec.format(Math.round(ki.purity * 100) / 100) + "%";
+    $("oRLabel").textContent = ki.k + "K gold rate";
+    $("oR").textContent = rs(ki.rate) + " / tola";
     $("oGold").textContent = rs(goldPrice);
     $("oDia").textContent = rs(diaPrice);
 
@@ -379,6 +416,7 @@
   function clearAuto() { FIELDS.forEach(function (id) { $(id).classList.remove("auto"); }); }
 
   function reset() {
+    // Gold rate and karat are left as they are.
     ["gwt", "nwt", "dia", "diaPct"].forEach(function (id) { $(id).value = ""; });
     clearAuto();
     $("msg").textContent = "";
@@ -542,7 +580,6 @@
     scanning = false;
   }
 
-  /* ---------- wire up ---------- */
   /* ---------- live camera ---------- */
   var stream = null;
 
@@ -591,6 +628,7 @@
     }, "image/jpeg", 0.92);
   }
 
+  /* ---------- wire up ---------- */
   $("camShoot").addEventListener("click", shoot);
   $("camCancel").addEventListener("click", closeCamera);
   $("camGallery").addEventListener("click", function () { closeCamera(); $("camInput").click(); });
@@ -615,6 +653,12 @@
     var v = parseFloat($("goldRate").value);
     if (isFinite(v) && v > 0) store("goldRate", JSON.stringify({ date: today(), value: v }));
     showRateNote();
+    showKaratNote();
+  });
+
+  $("karat").addEventListener("change", function () {
+    store("karat", $("karat").value);
+    showKaratNote();
   });
 
   restoreRates();
